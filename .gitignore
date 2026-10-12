@@ -1,0 +1,37 @@
+# Java / Maven
+**/target/
+*.class
+
+# Node / Vite
+**/node_modules/
+**/dist/
+npm-debug.log*
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+application-local.yml
+application-local.yaml
+application-*.local.yml
+application-*.local.yaml
+secrets/
+credentials/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.dump
+*.backup
+
+# IDE and operating-system files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Logs and process artifacts
+*.log
+*.pid

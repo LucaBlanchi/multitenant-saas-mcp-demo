@@ -1,0 +1,8 @@
+server:
+  address: 127.0.0.1
+app:
+  mcp:
+    # Fixed demo identity for local ChatGPT connection tests. Never configure in cloud.
+    demo-user-email: ${MCP_DEMO_USER_EMAIL:user1@email.com}
+    # A temporary query-key gate for a public test tunnel. Never commit or reuse this value.
+    demo-access-key: ${MCP_DEMO_ACCESS_KEY:}

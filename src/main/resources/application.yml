@@ -1,0 +1,53 @@
+server:
+  port: ${SERVER_PORT:8080}
+  address: ${SERVER_ADDRESS:127.0.0.1}
+spring:
+  profiles:
+    default: local
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/tenancy_platform}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:}
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 0
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+  jackson:
+    default-property-inclusion: non_null
+  ai:
+    mcp:
+      server:
+        protocol: STATELESS
+        type: SYNC
+        name: tenancy-platform
+        version: ${APP_VERSION:0.1.0}
+        instructions: >-
+          Operate only on work items in a tenancy explicitly selected by the user.
+          Access is limited to the authenticated user's memberships. Mutations require ADMIN.
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+        stateless:
+          mcp-endpoint: /mcp
+        request-timeout: 20s
+app:
+  seed:
+    enabled: ${APP_SEED_ENABLED:true}
+  jwt:
+    secret: ${JWT_SECRET:dev-only-secret-change-this-value-please-32bytes}
+  mcp:
+    public-base-url: ${MCP_PUBLIC_BASE_URL:http://127.0.0.1:8080}
+    issuer-uri: ${MCP_ISSUER_URI:}
+    resource-uri: ${MCP_RESOURCE_URI:${MCP_PUBLIC_BASE_URL:http://127.0.0.1:8080}/mcp}
+    allowed-hosts: ${MCP_ALLOWED_HOSTS:127.0.0.1:8080,localhost:8080}
+    allowed-origins: ${MCP_ALLOWED_ORIGINS:http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:5173,http://localhost:5174}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174}
