@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.filter.OncePerRequestFilter;
 @Component
-@Profile("!production")
+@Profile("!production & !oauth-local")
 public class JwtFilter extends OncePerRequestFilter {
  private final JwtService jwt; public JwtFilter(JwtService jwt) { this.jwt=jwt; }
  @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws ServletException, java.io.IOException {

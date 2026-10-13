@@ -8,6 +8,8 @@ import java.time.Instant;
 public final class McpDtos {
     private McpDtos() {}
 
+    public record AccountResult(UUID id, String email, String displayName) {}
+
     public record TenanciesResult(List<ApiDtos.TenancyView> tenancies) {
         public TenanciesResult {
             tenancies = List.copyOf(tenancies);

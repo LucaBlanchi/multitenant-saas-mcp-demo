@@ -12,7 +12,7 @@ import java.util.Map;
 
 /** RFC 9728 Protected Resource Metadata used by OAuth-capable MCP clients. */
 @RestController
-@Profile("production")
+@Profile({"production", "oauth-local"})
 public class McpProtectedResourceMetadataController {
 
     private final String resourceUri;

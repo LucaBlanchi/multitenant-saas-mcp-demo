@@ -2,7 +2,7 @@
 
 Starter dimostrativo per un SaaS multitenant con backend Java/Spring, PostgreSQL, due dashboard React con Mantine e server MCP Streamable HTTP. I dati di dominio `WorkItem` sono esempi sostituibili.
 
-> **Ambito:** questo repository è una demo locale, non un servizio pronto per dati reali o produzione. Il profilo di sviluppo include credenziali note e JWT HMAC; il profilo `production` richiede un issuer OAuth/OIDC esterno. Prima di un deployment servono revisione di sicurezza indipendente, test isolati, gestione operativa dei segreti, rate limiting distribuito, backup e monitoraggio.
+> **Ambito:** questo repository è una demo locale, non un servizio pronto per dati reali o produzione. Il profilo di sviluppo include credenziali note e JWT HMAC; `oauth-local` consente di provare OAuth per utente con token separati; `production` richiede un issuer OAuth/OIDC esterno. Prima di un deployment servono revisione di sicurezza indipendente, test isolati, gestione operativa dei segreti, rate limiting distribuito, backup e monitoraggio.
 
 ## Funzionalità
 
@@ -117,6 +117,7 @@ Le chiamate protette usano `Authorization: Bearer <token>`. Il login locale rest
 
 Endpoint Streamable HTTP stateless: `POST /mcp`. I tool disponibili sono:
 
+- `account_me` — identità effettiva del collegamento MCP (ID stabile, email e nome).
 - `tenancies_list` — tenant e membership dell'utente autenticato.
 - `work_items_list` — work item di un tenant cui l'utente appartiene.
 - `work_items_create` — crea un elemento `OPEN`; richiede `ADMIN`.
@@ -127,42 +128,39 @@ Ogni tool usa i service applicativi, che applicano i controlli membership, tenan
 
 I tool di elenco restituiscono oggetti `{ "tenancies": [...] }` e `{ "items": [...] }`, così anche gli schemi di output sono oggetti compatibili con i client MCP del 2025. Nel DTO MCP una descrizione assente viene resa come stringa vuota, coerentemente con lo schema dichiarato; il dominio e le API REST conservano la propria rappresentazione. Le risposte HTTP 200 possono contenere un risultato MCP `isError: true`: il controllo demo verifica il contenuto e una chiamata reale, non soltanto lo stato HTTP.
 
-### Collegamento MCP locale
+### Collegamento OAuth per utente
 
-Il login locale emette JWT di sviluppo, ma il profilo MCP demo è utile per un client che non offre un flusso OAuth. Avvialo in un terminale:
+Ogni chiamata MCP richiede un token OAuth dell'utente. Il server risponde `401` con un `WWW-Authenticate` che indica i metadati RFC 9728; il client apre il login, usa authorization code con PKCE `S256`, riceve il token e lo invia come `Authorization: Bearer`. Il token determina l'utente, mentre i service applicativi verificano membership e ruolo a ogni tool. Un client senza token non può usare gli strumenti. La vecchia modalità che trattava tutte le richieste come `user1` è stata rimossa.
 
-```sh
-export MCP_DEMO_ACCESS_KEY="$(openssl rand -hex 32)"
-make backend-mcp-demo MCP_DEMO_ACCESS_KEY="$MCP_DEMO_ACCESS_KEY"
-```
-
-Avvia il proxy locale in un altro terminale con la stessa chiave:
+Per una prova completamente locale, avvia PostgreSQL con i dati demo e poi:
 
 ```sh
-make mcp-demo-proxy MCP_DEMO_ACCESS_KEY="$MCP_DEMO_ACCESS_KEY"
+make backend-oauth-local
 ```
 
-Il backend demo ascolta solo su `127.0.0.1:8082`; il proxy ascolta solo su `127.0.0.1:8083`, inoltra esclusivamente `POST /mcp`, limita il corpo della richiesta e verifica la chiave. Le porte sono configurabili con `MCP_DEMO_BACKEND_PORT` e `MCP_DEMO_PROXY_PORT`. Questa chiave di test è trasmessa come parametro `mcp_demo_key` nell'URL e può comparire in configurazioni o log del client: usa solo dati fittizi e non riutilizzarla.
-
-Spring AI/MCP Java SDK qui usato implementa le revisioni MCP del 2025. I client recenti, incluso ChatGPT, possono iniziare con `server/discover` della revisione 2026-07-28: il proxy demo risponde con l'errore standard `-32601` e HTTP 404, consentendo al client di ripiegare su `initialize`. Non dichiara supporto al protocollo 2026. Questo passaggio evita l'HTTP 500 del vecchio SDK. Per un endpoint cloud diretto, aggiornare il trasporto SDK o applicare lo stesso comportamento di negoziazione al gateway autenticato.
-
-Senza un bearer token, il profilo demo MCP agisce come `user1@email.com`: può scrivere in Company 1 (`ADMIN`) e solo leggere in Company 2 (`MEMBER`).
-
-Non esporre il profilo `mcp-demo` a Internet. Per un test ChatGPT tramite un tunnel temporaneo serve un endpoint HTTPS raggiungibile da ChatGPT che inoltri solo al proxy locale; il connettore va configurato senza autenticazione MCP, perché il proxy verifica la chiave nell'URL. Arresta il tunnel e ruota la chiave al termine del test. Non usare questa modalità per un deployment condiviso.
-
-#### Avvio completo per un test con ChatGPT
-
-Su macOS installa `cloudflared` da una fonte ufficiale (ad esempio `brew install cloudflared`), avvia PostgreSQL e assicurati che il database demo contenga i dati di seed. Poi esegui:
+Il server ascolta solo su `127.0.0.1:8086`. Il client di prova predefinito è `local-mcp-client`, con callback `http://127.0.0.1:9876/callback`. In un secondo terminale puoi verificare due login OAuth distinti, identità, isolamento tenant e rifiuto di una scrittura da `MEMBER`:
 
 ```sh
-make mcp-chatgpt-demo
+MCP_OAUTH_TEST_PASSWORD='ChangeMe123!' python3 scripts/check-oauth-local.py
 ```
 
-Il comando genera una chiave casuale temporanea, avvia backend e proxy su porte locali dedicate, apre un Quick Tunnel Cloudflare e stampa l'URL MCP completo. Lascia il terminale aperto durante la prova. In ChatGPT apri **Plugin → + → Aggiungi un server MCP personalizzato**, scegli **URL del server**, incolla l'URL stampato, seleziona **Nessuna autenticazione** e crea il plugin. Al termine interrompi il comando con `Ctrl+C`: tunnel, proxy e backend demo vengono fermati.
+`oauth-local` usa Spring Security Authorization Server: login con le utenze del database, authorization code, PKCE, consenso e JWT firmati con una chiave RSA generata all'avvio. Client, autorizzazioni e chiave sono conservati solo in memoria e i token cessano di funzionare al riavvio. Questo profilo serve a provare il flusso, non a gestire utenti reali in cloud.
 
-Prima di stampare l'URL, il comando verifica anche la raggiungibilità pubblica, i cinque tool e la membership dell'utente demo. I Quick Tunnel sono temporanei: se Cloudflare li revoca, il comando termina e spegne i processi demo. Un nuovo avvio genera un nuovo URL e una nuova chiave; ChatGPT può richiedere la sostituzione dell'app demo perché l'URL di un'app già creata non è modificabile dalla relativa schermata. Per una connessione duratura usare un endpoint HTTPS stabile con OAuth o Secure MCP Tunnel.
+#### Prova con ChatGPT
 
-La demo usa `user1@email.com`: può leggere Company 1 e Company 2, ma può scrivere/eliminare solo in Company 1. L'URL contiene una chiave temporanea e i tool includono operazioni di modifica e cancellazione sui soli dati demo. Non condividere l'URL e non usarlo con dati reali. Questo è un percorso di prova locale, non un deployment SaaS.
+Per collegare ChatGPT, il server OAuth deve avere un URL HTTPS pubblico. Il launcher usa un Quick Tunnel Cloudflare, espone tramite proxy solo gli endpoint MCP/OAuth necessari e sostituisce le password demo pubbliche con due password casuali temporanee, senza modificare il database. Richiede `cloudflared`, Maven, Node.js, Python 3 e OpenSSL:
+
+```sh
+make mcp-chatgpt-oauth
+```
+
+Il comando stampa l'URL MCP e le due password temporanee. In ChatGPT crea un server MCP personalizzato con **OAuth** e registrazione **Client ID Metadata Document (CIMD)**, usando l'URL stampato. Non servono client ID, client secret o callback inseriti a mano. Il server verifica il documento CIMD pubblicato da ChatGPT, inclusa la callback; accetta solo URL `chatgpt.com` previsti. Supporta `none` e `private_key_jwt`: nel secondo caso Spring verifica l'asserzione RS256 con il JWKS ufficiale di ChatGPT. PKCE è richiesto in entrambi i casi. Quando il client apre il login, accedi con una delle due utenze e la rispettiva password temporanea; `account_me` mostra l'identità effettiva. Ogni persona può creare il proprio collegamento e accedere con il proprio account. Il suo token e i suoi permessi restano distinti dagli altri collegamenti.
+
+Il profilo locale registra anche `local-mcp-client` con callback `http://127.0.0.1:9876/callback` per lo script di verifica. Questo client di prova non è quello da configurare in ChatGPT. La demo pubblica consente solo gli account fittizi `user1@email.com` e `user2@email.com`; per utenti reali serve un identity provider con account individuali e registrazione dei client MCP.
+
+Il Quick Tunnel è temporaneo. Tieni il terminale aperto; `Ctrl+C` ferma tunnel, proxy e backend. Un nuovo avvio cambia URL, issuer, chiave di firma e password, quindi richiede una nuova configurazione del collegamento in ChatGPT. Questo resta un test su dati fittizi: per un servizio stabile servono dominio HTTPS, identity provider e sessioni/token persistenti.
+
+Spring AI/MCP Java SDK qui usato implementa revisioni MCP del 2025. Il gateway per la prova ChatGPT risponde a `server/discover` con `-32601` e HTTP 404, consentendo il fallback al handshake `initialize`; non dichiara supporto alla revisione 2026. Per un endpoint cloud diretto aggiornare il trasporto SDK o applicare lo stesso comportamento al gateway autenticato.
 
 ### Profilo `production`
 
@@ -244,6 +242,6 @@ Questo starter non deve essere collegato a dati reali senza ulteriore lavoro. In
 6. completare test isolati di autorizzazione cross-tenant, ruoli, flussi MCP e migrazioni; la suite attuale include solo test unitari iniziali e non sostituisce questi test d'integrazione;
 7. rivedere gestione account, revoca delle sessioni, recupero password, audit, logging e requisiti privacy;
 8. proteggere il database con un account a privilegi minimi, rete privata e policy operative;
-9. non esporre il profilo `mcp-demo` o l'URL con chiave temporanea su un ambiente condiviso.
+9. usare `oauth-local` solo con dati fittizi e password temporanee; per un ambiente condiviso configurare un issuer OAuth/OIDC gestito e persistente.
 
 Una configurazione OAuth, TLS o proxy dichiarata nel README non dimostra che il deployment reale sia correttamente impostato. Verificare ogni controllo nell'ambiente che ospita il servizio.

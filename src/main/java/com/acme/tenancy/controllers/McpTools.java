@@ -5,6 +5,7 @@ import com.acme.tenancy.datatypes.ApiDtos.WorkItemRequest;
 import com.acme.tenancy.datatypes.McpDtos.TenanciesResult;
 import com.acme.tenancy.datatypes.McpDtos.WorkItemsResult;
 import com.acme.tenancy.datatypes.McpDtos.WorkItemResult;
+import com.acme.tenancy.datatypes.McpDtos.AccountResult;
 import com.acme.tenancy.exceptions.ApiException;
 import com.acme.tenancy.repositories.UserRepository;
 import com.acme.tenancy.security.CurrentUser;
@@ -15,8 +16,6 @@ import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -31,15 +30,27 @@ public class McpTools {
     private final TenancyAccessService access;
     private final McpAuditService audit;
     private final UserRepository users;
-    private final String demoUserEmail;
 
     public McpTools(WorkItemService workItems, TenancyAccessService access, McpAuditService audit,
-                    UserRepository users, @Value("${app.mcp.demo-user-email:}") String demoUserEmail) {
+                    UserRepository users) {
         this.workItems = workItems;
         this.access = access;
         this.audit = audit;
         this.users = users;
-        this.demoUserEmail = demoUserEmail;
+    }
+
+    @McpTool(
+            name = "account_me",
+            title = "My account",
+            description = "Return the authenticated account ID, email and name. Use this to confirm which account the MCP client connected.",
+            generateOutputSchema = true,
+            annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public AccountResult account() {
+        UUID userId = currentUserId();
+        return audited("account_me", userId, null, () -> {
+            var account = users.findById(userId).orElseThrow(() -> ApiException.unauthorized("Account no longer exists"));
+            return new AccountResult(account.getId(), account.getEmail(), account.getDisplayName());
+        });
     }
 
     @McpTool(
@@ -129,11 +140,6 @@ public class McpTools {
     private UUID currentUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !(authentication.getPrincipal() instanceof CurrentUser user)) {
-            if (StringUtils.hasText(demoUserEmail)) {
-                return users.findByEmail(demoUserEmail.trim().toLowerCase())
-                        .orElseThrow(() -> new IllegalStateException("MCP demo user not found; start the demo seed"))
-                        .getId();
-            }
             throw ApiException.unauthorized("A valid user access token is required");
         }
         return user.id();

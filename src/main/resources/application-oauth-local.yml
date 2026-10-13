@@ -1,0 +1,14 @@
+server:
+  address: 127.0.0.1
+  forward-headers-strategy: framework
+app:
+  mcp:
+    public-base-url: ${MCP_PUBLIC_BASE_URL:http://127.0.0.1:8086}
+    issuer-uri: ${MCP_ISSUER_URI:${app.mcp.public-base-url}}
+    resource-uri: ${MCP_RESOURCE_URI:${app.mcp.public-base-url}/mcp}
+    oauth-client-id: ${MCP_OAUTH_CLIENT_ID:local-mcp-client}
+    oauth-redirect-uri: ${MCP_OAUTH_REDIRECT_URI:http://127.0.0.1:9876/callback}
+    oauth-demo-user1-password: ${MCP_OAUTH_DEMO_USER1_PASSWORD:}
+    oauth-demo-user2-password: ${MCP_OAUTH_DEMO_USER2_PASSWORD:}
+    allowed-hosts: ${MCP_ALLOWED_HOSTS:127.0.0.1:8086}
+    allowed-origins: ${MCP_ALLOWED_ORIGINS:}

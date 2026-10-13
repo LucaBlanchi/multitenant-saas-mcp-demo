@@ -35,7 +35,7 @@ public class SecurityConfig {
 
     /** Local UI/demo login. This signed development token is never accepted in production. */
     @Bean
-    @Profile("!production & !mcp-demo")
+    @Profile("!production & !oauth-local")
     @Order(1)
     SecurityFilterChain localSecurity(HttpSecurity http, JwtFilter jwt) throws Exception {
         return http
@@ -44,30 +44,6 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login", "/error").permitAll()
-                        .requestMatchers("/api/superadmin/**").hasRole("SUPERADMIN")
-                        .anyRequest().authenticated())
-                .exceptionHandling(errors -> errors.authenticationEntryPoint((request, response, error) -> {
-                    response.setStatus(401);
-                    response.setHeader(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
-                    response.setContentType("application/json");
-                    response.getWriter().write("{\"status\":401,\"code\":\"UNAUTHENTICATED\",\"message\":\"Authentication required\"}");
-                }))
-                .addFilterBefore(jwt, UsernamePasswordAuthenticationFilter.class)
-                .build();
-    }
-
-    /** Explicit local-only profile for trying MCP clients without an OAuth login flow. */
-    @Bean
-    @Profile("mcp-demo & !production")
-    @Order(1)
-    SecurityFilterChain mcpDemoSecurity(HttpSecurity http, JwtFilter jwt) throws Exception {
-        return http
-                .cors(Customizer.withDefaults())
-                .csrf(csrf -> csrf.disable())
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/login", "/error").permitAll()
-                        .requestMatchers("/mcp").permitAll()
                         .requestMatchers("/api/superadmin/**").hasRole("SUPERADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(errors -> errors.authenticationEntryPoint((request, response, error) -> {
@@ -141,7 +117,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    @Profile("production")
+    @Profile({"production", "oauth-local"})
     Converter<Jwt, ? extends AbstractAuthenticationToken> mcpJwtAuthenticationConverter(UserRepository users) {
         JwtGrantedAuthoritiesConverter scopes = new JwtGrantedAuthoritiesConverter();
         return jwt -> {

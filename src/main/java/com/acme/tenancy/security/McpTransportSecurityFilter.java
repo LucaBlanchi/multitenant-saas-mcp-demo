@@ -14,8 +14,6 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Set;
@@ -28,24 +26,13 @@ public class McpTransportSecurityFilter extends OncePerRequestFilter {
 
     private final Set<String> allowedHosts;
     private final Set<String> allowedOrigins;
-    private final String demoAccessKey;
-    private final boolean demoProfile;
 
     public McpTransportSecurityFilter(
             @Value("${app.mcp.allowed-hosts}") String hosts,
             @Value("${app.mcp.allowed-origins}") String origins,
-            @Value("${app.mcp.demo-access-key:}") String demoAccessKey,
             Environment environment) {
         this.allowedHosts = parse(hosts);
         this.allowedOrigins = parse(origins);
-        this.demoProfile = environment.acceptsProfiles(Profiles.of("mcp-demo"));
-        this.demoAccessKey = demoAccessKey;
-        if (demoProfile && environment.acceptsProfiles(Profiles.of("production"))) {
-            throw new IllegalStateException("The mcp-demo profile cannot be combined with production");
-        }
-        if (demoProfile && !StringUtils.hasText(demoAccessKey)) {
-            throw new IllegalStateException("Set MCP_DEMO_ACCESS_KEY for the temporary MCP demo endpoint");
-        }
         if (environment.acceptsProfiles(Profiles.of("production"))) {
             if (allowedHosts.isEmpty() || allowedHosts.stream().anyMatch(McpTransportSecurityFilter::isLoopback)) {
                 throw new IllegalStateException("Set MCP_ALLOWED_HOSTS to the public MCP host(s) in production");
@@ -64,17 +51,11 @@ public class McpTransportSecurityFilter extends OncePerRequestFilter {
         String host = normalize(request.getHeader("Host"));
         String origin = request.getHeader("Origin");
         if (host == null || !allowedHosts.contains(host)
-                || (demoProfile && !matchesDemoKey(request.getParameter("mcp_demo_key")))
                 || (StringUtils.hasText(origin) && !allowedOrigins.contains(origin.trim()))) {
             response.sendError(HttpServletResponse.SC_FORBIDDEN);
             return;
         }
         chain.doFilter(request, response);
-    }
-
-    private boolean matchesDemoKey(String supplied) {
-        return supplied != null && MessageDigest.isEqual(
-                demoAccessKey.getBytes(StandardCharsets.UTF_8), supplied.getBytes(StandardCharsets.UTF_8));
     }
 
     private static Set<String> parse(String input) {
