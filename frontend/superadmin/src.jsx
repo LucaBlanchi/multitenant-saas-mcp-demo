@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Alert, AppShell, Badge, Button, Checkbox, Code, Group, MantineProvider,
@@ -19,14 +19,25 @@ function App() {
   const [memberships, setMemberships] = useState([]);
   const [busy, setBusy] = useState(false);
 
+  const session = useRef(token);
+  session.current = token;
+
+  function assertCurrentRequest() {
+    if (session.current !== token) throw new DOMException('Session changed', 'AbortError');
+  }
+  function showError(err) { if (err.name !== 'AbortError') setError(err.message); }
+
   async function api(path, options = {}) {
-    const response = await fetch(API + path, {
-      ...options,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...options.headers },
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw Error(result.message || response.statusText);
-    return result;
+    assertCurrentRequest();
+    try {
+      const response = await fetch(API + path, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...options.headers },
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw Error(result.message || response.statusText);
+      return result;
+    } finally { assertCurrentRequest(); }
   }
 
   async function load() {
@@ -41,7 +52,7 @@ function App() {
       setMemberships(allMemberships);
       setError('');
     } catch (err) {
-      setError(err.message);
+      showError(err);
     }
   }
 
@@ -62,10 +73,12 @@ function App() {
       });
       const result = await response.json();
       if (!response.ok) throw Error(result.message);
+      session.current = result.token;
+      setUser(null); setTenancies([]); setUsers([]); setMemberships([]);
       localStorage.setItem('root-token', result.token);
       setToken(result.token);
     } catch (err) {
-      setError(err.message);
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -78,11 +91,13 @@ function App() {
       reset?.();
       await load();
     } catch (err) {
-      setError(err.message);
+      showError(err);
     }
   }
 
   function logout() {
+    session.current = '';
+    setUser(null); setTenancies([]); setUsers([]); setMemberships([]); setError('');
     localStorage.removeItem('root-token');
     setToken('');
   }

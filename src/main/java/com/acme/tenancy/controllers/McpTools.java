@@ -8,13 +8,11 @@ import com.acme.tenancy.datatypes.McpDtos.WorkItemResult;
 import com.acme.tenancy.datatypes.McpDtos.AccountResult;
 import com.acme.tenancy.exceptions.ApiException;
 import com.acme.tenancy.repositories.UserRepository;
-import com.acme.tenancy.security.CurrentUser;
 import com.acme.tenancy.services.McpAuditService;
 import com.acme.tenancy.services.TenancyAccessService;
 import com.acme.tenancy.services.WorkItemService;
 import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
@@ -113,7 +111,7 @@ public class McpTools {
         UUID workItemId = parseUuid(id, "id");
         validateTitle(title);
         validateDescription(description);
-        if (!List.of("OPEN", "IN_PROGRESS", "DONE").contains(status)) {
+        if (status == null || !List.of("OPEN", "IN_PROGRESS", "DONE").contains(status)) {
             throw ApiException.badRequest("status must be OPEN, IN_PROGRESS, or DONE");
         }
         return audited("work_items_update", userId, tenancyId,
@@ -138,11 +136,7 @@ public class McpTools {
     }
 
     private UUID currentUserId() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !(authentication.getPrincipal() instanceof CurrentUser user)) {
-            throw ApiException.unauthorized("A valid user access token is required");
-        }
-        return user.id();
+        return PrincipalHelper.id(SecurityContextHolder.getContext().getAuthentication());
     }
 
     private <T> T audited(String tool, UUID userId, String tenancyId, Supplier<T> operation) {
@@ -172,7 +166,9 @@ public class McpTools {
 
     private static UUID parseUuid(String value, String field) {
         try {
-            return UUID.fromString(value);
+            UUID id = UUID.fromString(value);
+            if (!id.toString().equalsIgnoreCase(value)) throw new IllegalArgumentException();
+            return id;
         }
         catch (RuntimeException exception) {
             throw ApiException.badRequest(field + " must be a UUID");

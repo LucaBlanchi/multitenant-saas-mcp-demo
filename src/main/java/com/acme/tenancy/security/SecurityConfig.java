@@ -14,12 +14,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.oauth2.core.OAuth2Error;
-import org.springframework.security.oauth2.core.OAuth2TokenValidator;
-import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
@@ -44,6 +40,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login", "/error").permitAll()
+                        .requestMatchers("/mcp", "/mcp/**").denyAll()
                         .requestMatchers("/api/superadmin/**").hasRole("SUPERADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(errors -> errors.authenticationEntryPoint((request, response, error) -> {
@@ -72,9 +69,13 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/error").permitAll()
                         .requestMatchers("/api/auth/login").denyAll()
-                        .requestMatchers("/api/superadmin/**").hasRole("SUPERADMIN")
+                        .requestMatchers("/api/superadmin/**").access(
+                                org.springframework.security.authorization.AuthorizationManagers.allOf(
+                                        org.springframework.security.authorization.AuthorityAuthorizationManager.hasAuthority("SCOPE_api:access"),
+                                        org.springframework.security.authorization.AuthorityAuthorizationManager.hasRole("SUPERADMIN")))
                         .requestMatchers("/mcp").hasAuthority("SCOPE_mcp:connect")
-                        .anyRequest().authenticated())
+                        .requestMatchers("/api/**").hasAuthority("SCOPE_api:access")
+                        .anyRequest().denyAll())
                 .exceptionHandling(errors -> errors.authenticationEntryPoint((request, response, error) -> {
                     response.setStatus(401);
                     response.setHeader(HttpHeaders.WWW_AUTHENTICATE, "Bearer resource_metadata=\"" + metadataUri + "\"");
@@ -89,8 +90,7 @@ public class SecurityConfig {
     @Profile("production")
     JwtDecoder mcpJwtDecoder(
             @Value("${app.mcp.issuer-uri}") String issuerUri,
-            @Value("${app.mcp.resource-uri}") String resourceUri,
-            UserRepository users) {
+            @Value("${app.mcp.resource-uri}") String resourceUri) {
         if (issuerUri == null || issuerUri.isBlank()) {
             throw new IllegalStateException("MCP_ISSUER_URI is required in the production profile");
         }
@@ -98,21 +98,7 @@ public class SecurityConfig {
             throw new IllegalStateException("Production MCP issuer and resource URLs must use HTTPS");
         }
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withIssuerLocation(issuerUri).build();
-        OAuth2TokenValidator<Jwt> issuerValidator = JwtValidators.createDefaultWithIssuer(issuerUri);
-        OAuth2TokenValidator<Jwt> audienceValidator = jwt -> jwt.getAudience().contains(resourceUri)
-                ? OAuth2TokenValidatorResult.success()
-                : OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "Access token audience is not this MCP resource", null));
-        decoder.setJwtValidator(jwt -> {
-            OAuth2TokenValidatorResult issuer = issuerValidator.validate(jwt);
-            OAuth2TokenValidatorResult audience = audienceValidator.validate(jwt);
-            if (issuer.hasErrors() || audience.hasErrors()) {
-                List<OAuth2Error> errors = new ArrayList<>();
-                errors.addAll(issuer.getErrors());
-                errors.addAll(audience.getErrors());
-                return OAuth2TokenValidatorResult.failure(errors);
-            }
-            return OAuth2TokenValidatorResult.success();
-        });
+        decoder.setJwtValidator(McpTokenValidators.forResource(issuerUri, resourceUri));
         return decoder;
     }
 

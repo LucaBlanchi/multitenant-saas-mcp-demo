@@ -24,13 +24,9 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
-import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
-import org.springframework.security.oauth2.core.OAuth2TokenValidator;
-import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
@@ -136,7 +132,7 @@ public class LocalOAuthConfig {
                     default -> throw new UsernameNotFoundException("Account unavailable in temporary OAuth demo");
                 };
             }
-            return User.withUsername(account.getEmail()).password(passwordHash).roles("USER").build();
+            return new OAuthUser(account.getId(), account.getEmail(), passwordHash);
         };
     }
 
@@ -190,16 +186,7 @@ public class LocalOAuthConfig {
             @Value("${app.mcp.issuer-uri}") String issuerUri,
             @Value("${app.mcp.resource-uri}") String resourceUri) {
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withPublicKey((RSAPublicKey) localOAuthKeyPair.getPublic()).build();
-        OAuth2TokenValidator<Jwt> issuer = JwtValidators.createDefaultWithIssuer(issuerUri);
-        OAuth2TokenValidator<Jwt> audience = jwt -> jwt.getAudience().contains(resourceUri)
-                ? OAuth2TokenValidatorResult.success()
-                : OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "Wrong MCP audience", null));
-        decoder.setJwtValidator(jwt -> {
-            OAuth2TokenValidatorResult first = issuer.validate(jwt);
-            OAuth2TokenValidatorResult second = audience.validate(jwt);
-            if (first.hasErrors()) return first;
-            return second;
-        });
+        decoder.setJwtValidator(McpTokenValidators.forResource(issuerUri, resourceUri));
         return decoder;
     }
 
@@ -208,10 +195,21 @@ public class LocalOAuthConfig {
             @Value("${app.mcp.resource-uri}") String resourceUri) {
         return context -> {
             if (!OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())) return;
-            String email = context.getPrincipal().getName();
-            UserAccount user = users.findByEmail(email.toLowerCase(Locale.ROOT))
+            if (!(context.getPrincipal().getPrincipal() instanceof OAuthUser principal)) {
+                throw new IllegalStateException("OAuth authorization requires a user login");
+            }
+            UserAccount user = users.findById(principal.accountId)
                     .orElseThrow(() -> new IllegalStateException("OAuth user was removed"));
-            context.getClaims().claim("user_id", user.getId().toString()).audience(List.of(resourceUri));
+            context.getClaims().subject(user.getId().toString())
+                    .claim("user_id", user.getId().toString()).audience(List.of(resourceUri));
         };
+    }
+    static final class OAuthUser extends User {
+        private final UUID accountId;
+
+        OAuthUser(UUID accountId, String email, String passwordHash) {
+            super(email, passwordHash, List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_USER")));
+            this.accountId = accountId;
+        }
     }
 }

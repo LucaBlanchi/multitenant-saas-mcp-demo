@@ -130,7 +130,7 @@ I tool di elenco restituiscono oggetti `{ "tenancies": [...] }` e `{ "items": [.
 
 ### Collegamento OAuth per utente
 
-Ogni chiamata MCP richiede un token OAuth dell'utente. Il server risponde `401` con un `WWW-Authenticate` che indica i metadati RFC 9728; il client apre il login, usa authorization code con PKCE `S256`, riceve il token e lo invia come `Authorization: Bearer`. Il token determina l'utente, mentre i service applicativi verificano membership e ruolo a ogni tool. Un client senza token non può usare gli strumenti. La vecchia modalità che trattava tutte le richieste come `user1` è stata rimossa.
+Ogni chiamata MCP richiede un token OAuth dell'utente. Il profilo dashboard `local` rifiuta `/mcp`: i JWT di sviluppo non sono credenziali MCP. Il server risponde `401` con un `WWW-Authenticate` che indica i metadati RFC 9728; il client apre il login, usa authorization code con PKCE `S256`, riceve il token e lo invia come `Authorization: Bearer`. Il token determina l'utente, mentre i service applicativi verificano membership e ruolo a ogni tool. Un client senza token non può usare gli strumenti. La vecchia modalità che trattava tutte le richieste come `user1` è stata rimossa.
 
 Per una prova completamente locale, avvia PostgreSQL con i dati demo e poi:
 
@@ -144,7 +144,7 @@ Il server ascolta solo su `127.0.0.1:8086`. Il client di prova predefinito è `l
 MCP_OAUTH_TEST_PASSWORD='ChangeMe123!' python3 scripts/check-oauth-local.py
 ```
 
-`oauth-local` usa Spring Security Authorization Server: login con le utenze del database, authorization code, PKCE, consenso e JWT firmati con una chiave RSA generata all'avvio. Client, autorizzazioni e chiave sono conservati solo in memoria e i token cessano di funzionare al riavvio. Questo profilo serve a provare il flusso, non a gestire utenti reali in cloud.
+`oauth-local` usa Spring Security Authorization Server: login con le utenze del database, authorization code, PKCE, consenso e JWT firmati con una chiave RSA generata all'avvio. Client, autorizzazioni e chiave sono conservati solo in memoria e i token cessano di funzionare al riavvio. L'autorizzazione conserva l'UUID dell'account autenticato; emissione e refresh non ricollegano l'account cercando nuovamente l'email. Questo profilo serve a provare il flusso, non a gestire utenti reali in cloud.
 
 #### Prova con ChatGPT
 
@@ -154,7 +154,7 @@ Per collegare ChatGPT, il server OAuth deve avere un URL HTTPS pubblico. Il laun
 make mcp-chatgpt-oauth
 ```
 
-Il comando stampa l'URL MCP e le due password temporanee. In ChatGPT crea un server MCP personalizzato con **OAuth** e registrazione **Client ID Metadata Document (CIMD)**, usando l'URL stampato. Non servono client ID, client secret o callback inseriti a mano. Il server verifica il documento CIMD pubblicato da ChatGPT, inclusa la callback; accetta solo URL `chatgpt.com` previsti. Supporta `none` e `private_key_jwt`: nel secondo caso Spring verifica l'asserzione RS256 con il JWKS ufficiale di ChatGPT. PKCE è richiesto in entrambi i casi. Quando il client apre il login, accedi con una delle due utenze e la rispettiva password temporanea; `account_me` mostra l'identità effettiva. Ogni persona può creare il proprio collegamento e accedere con il proprio account. Il suo token e i suoi permessi restano distinti dagli altri collegamenti.
+Il comando stampa l'URL MCP e le due password temporanee. In ChatGPT crea un server MCP personalizzato con **OAuth** e registrazione **Client ID Metadata Document (CIMD)**, usando l'URL stampato. Non servono client ID, client secret o callback inseriti a mano. Il server verifica il documento CIMD pubblicato da ChatGPT, inclusa la callback; accetta solo URL `chatgpt.com` previsti. Supporta `none` e `private_key_jwt`: nel secondo caso Spring verifica l'asserzione RS256 con il JWKS ufficiale di ChatGPT. PKCE è richiesto in entrambi i casi. I documenti hanno un limite di 16 KiB e una scadenza di recupero di 5 secondi; la demo ammette 128 client e al massimo 4 recuperi simultanei. Il recupero non mantiene il lock della repository e non blocca i client già noti. Quando il client apre il login, accedi con una delle due utenze e la rispettiva password temporanea; `account_me` mostra l'identità effettiva. Ogni persona può creare il proprio collegamento e accedere con il proprio account. Il suo token e i suoi permessi restano distinti dagli altri collegamenti.
 
 Il profilo locale registra anche `local-mcp-client` con callback `http://127.0.0.1:9876/callback` per lo script di verifica. Questo client di prova non è quello da configurare in ChatGPT. La demo pubblica consente solo gli account fittizi `user1@email.com` e `user2@email.com`; per utenti reali serve un identity provider con account individuali e registrazione dei client MCP.
 
@@ -162,15 +162,32 @@ Il Quick Tunnel è temporaneo. Tieni il terminale aperto; `Ctrl+C` ferma tunnel,
 
 Spring AI/MCP Java SDK qui usato implementa revisioni MCP del 2025. Il gateway per la prova ChatGPT risponde a `server/discover` con `-32601` e HTTP 404, consentendo il fallback al handshake `initialize`; non dichiara supporto alla revisione 2026. Per un endpoint cloud diretto aggiornare il trasporto SDK o applicare lo stesso comportamento al gateway autenticato.
 
+### Regole di autorizzazione
+
+Il client non può scegliere l'utente con un argomento, un header tenant o un ruolo dichiarato. L'identità viene dal token verificato e dall'account corrente. `tenancyId` seleziona il contesto e viene autorizzato server-side.
+
+| Operazione | Requisito |
+| --- | --- |
+| `account_me`, `tenancies_list` | Token MCP valido e account esistente; restituiscono soltanto i dati del chiamante |
+| `work_items_list` | Membership corrente nel tenant selezionato |
+| `work_items_create`, `work_items_update`, `work_items_delete` | Membership corrente `ADMIN` nel tenant selezionato |
+| Aggiornamento/cancellazione per ID | L'elemento deve appartenere allo stesso tenant autorizzato |
+| API superadmin | Scope REST `api:access` in produzione e flag superadmin corrente; nessun tool MCP amministrativo |
+
+Un superadmin non aggira le membership dei tenant nei tool business. Le membership e i ruoli vengono rilette a ogni operazione: una revoca vale sulla richiesta successiva. I token e le annotazioni MCP non contengono una copia autorevole dei ruoli tenant. Una richiesta già accettata può completarsi durante un logout o una revoca; per annullarla servirebbe un diverso protocollo transazionale.
+
+Le dashboard scartano le risposte di richieste avviate con un account o tenant precedente e svuotano i dati al logout. Il gateway demo limita corpo delle richieste (1 MiB), risposte (4 MiB), connessioni e tempi, mantiene gli header di sicurezza e vieta la cache sulle risposte private.
+
 ### Profilo `production`
 
 Il profilo `production` usa Spring Security Resource Server e accetta access token JWT firmati dall'issuer OAuth/OIDC configurato. Richiede:
 
 - scope `mcp:connect`;
 - audience corrispondente all'URL MCP (`MCP_RESOURCE_URI`);
-- claim `user_id` con UUID dell'utente applicativo.
+- claim `user_id` con UUID dell'utente applicativo;
+- scadenza `exp` obbligatoria e `sub` non vuoto.
 
-Il ruolo superadmin viene letto dall'utente nel database e non è preso dal token. Il progetto implementa il resource server, non l'authorization server o il flusso di login OAuth per i frontend.
+Il ruolo superadmin viene letto dall'utente nel database e non è preso dal token. Un token con il solo scope `mcp:connect` non autorizza le API REST: nel profilo `production` queste richiedono `api:access`, e le API amministrative richiedono anche il flag superadmin corrente. Il progetto implementa il resource server, non l'authorization server o il flusso di login OAuth per i frontend.
 
 L'issuer deve generare `user_id` da una mappatura attendibile e immutabile dell'identità; il progetto non implementa la registrazione o il collegamento degli account OAuth. Verificare questa policy dell'issuer prima di configurare il profilo.
 
@@ -230,6 +247,10 @@ make build
 
 Il target make test esegue i test backend. Il target make build esegue test e packaging Maven, poi crea le build Vite dei due frontend.
 
+## Revisione di sicurezza
+
+La revisione segue la [skill ufficiale Cloudflare Security Audit](https://github.com/cloudflare/security-audit-skill). Esito, ambito, correzioni e limiti sono documentati in [docs/security-review.md](docs/security-review.md). I test di regressione backend si eseguono anche senza rete, con dipendenze già presenti: `mvn -o test`. Usano account fittizi, repository e decoder mock, senza server, database o tunnel.
+
 ## Note di sicurezza prima di un deployment
 
 Questo starter non deve essere collegato a dati reali senza ulteriore lavoro. In particolare:
@@ -239,7 +260,7 @@ Questo starter non deve essere collegato a dati reali senza ulteriore lavoro. In
 3. imporre rate limiting e limiti di payload/concorrenza su gateway e login;
 4. configurare TLS, secret manager, backup cifrati, restore testato, retention e monitoraggio;
 5. verificare versioni e vulnerabilità delle dipendenze con strumenti aggiornati nel processo CI;
-6. completare test isolati di autorizzazione cross-tenant, ruoli, flussi MCP e migrazioni; la suite attuale include solo test unitari iniziali e non sostituisce questi test d'integrazione;
+6. completare test isolati di autorizzazione cross-tenant, ruoli, flussi MCP e migrazioni; la suite comprende test negativi REST/MCP con filter chain Spring e repository mock; non sostituisce la verifica end-to-end di un deployment reale;
 7. rivedere gestione account, revoca delle sessioni, recupero password, audit, logging e requisiti privacy;
 8. proteggere il database con un account a privilegi minimi, rete privata e policy operative;
 9. usare `oauth-local` solo con dati fittizi e password temporanee; per un ambiente condiviso configurare un issuer OAuth/OIDC gestito e persistente.

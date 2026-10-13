@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ActionIcon, Alert, AppShell, Badge, Button, Group, MantineProvider,
@@ -21,21 +21,40 @@ function App() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
 
-  async function api(path, opts = {}) {
-    const res = await fetch(API + path, {
-      ...opts,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(tenant ? { 'X-Tenant-Id': tenant } : {}),
-        ...opts.headers,
-      },
-    });
-    if (!res.ok) {
-      const result = await res.json().catch(() => ({ message: res.statusText }));
-      throw Error(result.message || 'Richiesta non riuscita');
+  const session = useRef({ token, tenant });
+  session.current = { token, tenant };
+
+  function assertCurrentRequest() {
+    if (session.current.token !== token || session.current.tenant !== tenant) {
+      throw new DOMException('Session or tenancy changed', 'AbortError');
     }
-    return res.status === 204 ? null : res.json();
+  }
+  function showError(err) { if (err.name !== 'AbortError') setError(err.message); }
+  function selectTenant(value) {
+    session.current = { token, tenant: value };
+    setItems([]);
+    setTenant(value);
+    localStorage.setItem('tenant', value);
+  }
+
+  async function api(path, opts = {}) {
+    assertCurrentRequest();
+    try {
+      const res = await fetch(API + path, {
+        ...opts,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(tenant ? { 'X-Tenant-Id': tenant } : {}),
+          ...opts.headers,
+        },
+      });
+      if (!res.ok) {
+        const result = await res.json().catch(() => ({ message: res.statusText }));
+        throw Error(result.message || 'Richiesta non riuscita');
+      }
+      return res.status === 204 ? null : await res.json();
+    } finally { assertCurrentRequest(); }
   }
 
   async function load() {
@@ -46,12 +65,11 @@ function App() {
       ]);
       setUser(currentUser);
       setTenancies(availableTenancies);
-      if (!tenant && availableTenancies.length) {
-        setTenant(availableTenancies[0].id);
-        localStorage.setItem('tenant', availableTenancies[0].id);
+      if (!availableTenancies.some(entry => entry.id === tenant)) {
+        selectTenant(availableTenancies[0]?.id || '');
       }
     } catch (err) {
-      setError(err.message);
+      showError(err);
     }
   }
 
@@ -61,7 +79,7 @@ function App() {
   }, [token]);
 
   useEffect(() => {
-    if (token && tenant) api('/api/work-items').then(setItems).catch(err => setError(err.message));
+    if (token && tenant) api('/api/work-items').then(setItems).catch(showError);
   }, [token, tenant]);
 
   async function login(event) {
@@ -79,16 +97,22 @@ function App() {
       });
       const result = await res.json();
       if (!res.ok) throw Error(result.message);
+      session.current = { token: result.token, tenant: '' };
+      setUser(null); setTenancies([]); setItems([]); setTenant('');
+      localStorage.removeItem('tenant');
       localStorage.setItem('token', result.token);
       setToken(result.token);
     } catch (err) {
-      setError(err.message);
+      showError(err);
     } finally {
       setBusy(false);
     }
   }
 
   function logout() {
+    session.current = { token: '', tenant: '' };
+    setUser(null); setTenancies([]); setItems([]);
+    setTitle(''); setDescription(''); setError('');
     localStorage.removeItem('token');
     localStorage.removeItem('tenant');
     setToken('');
@@ -102,21 +126,21 @@ function App() {
       setTitle('');
       setDescription('');
       setItems(await api('/api/work-items'));
-    } catch (err) { setError(err.message); }
+    } catch (err) { showError(err); }
   }
 
   async function change(item, status) {
     try {
       await api(`/api/work-items/${item.id}`, { method: 'PUT', body: JSON.stringify({ ...item, status }) });
       setItems(await api('/api/work-items'));
-    } catch (err) { setError(err.message); }
+    } catch (err) { showError(err); }
   }
 
   async function remove(id) {
     try {
       await api(`/api/work-items/${id}`, { method: 'DELETE' });
       setItems(await api('/api/work-items'));
-    } catch (err) { setError(err.message); }
+    } catch (err) { showError(err); }
   }
 
   const selected = tenancies.find(entry => entry.id === tenant);
@@ -158,7 +182,7 @@ function App() {
               aria-label="Organizzazione"
               placeholder="Organizzazione"
               value={tenant || null}
-              onChange={value => { setTenant(value || ''); localStorage.setItem('tenant', value || ''); }}
+              onChange={value => selectTenant(value || '')}
               data={tenancies.map(entry => ({ value: entry.id, label: `${entry.name} · ${entry.role}` }))}
             />
           </Group>
@@ -166,7 +190,7 @@ function App() {
           <Paper className="panel" p="md" radius="md">
             <Group justify="space-between" mb="md">
               <Group gap="sm"><Title order={3}>Work items</Title>{selected && <Badge variant="light">{selected.role}</Badge>}</Group>
-              <ActionIcon variant="light" onClick={() => api('/api/work-items').then(setItems).catch(err => setError(err.message))} aria-label="Aggiorna">
+              <ActionIcon variant="light" onClick={() => api('/api/work-items').then(setItems).catch(showError)} aria-label="Aggiorna">
                 <IconRefresh size={17} />
               </ActionIcon>
             </Group>
