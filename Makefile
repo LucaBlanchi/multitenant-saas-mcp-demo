@@ -3,8 +3,10 @@ DB_NAME ?= tenancy_platform
 DB_USER ?= postgres
 DB_HOST ?= localhost
 DB_PORT ?= 5432
+MCP_DEMO_BACKEND_PORT ?= 8082
+MCP_DEMO_PROXY_PORT ?= 8083
 
-.PHONY: setup db-start db-create dev backend backend-mcp-demo mcp-demo-proxy tenant-ui admin-ui test build clean
+.PHONY: setup db-start db-create dev backend backend-mcp-demo mcp-demo-proxy mcp-chatgpt-demo tenant-ui admin-ui test build clean
 setup:
 	brew install maven postgresql@16 node
 	brew services start postgresql@16
@@ -27,11 +29,14 @@ backend:
 
 backend-mcp-demo:
 	@test -n "$(MCP_DEMO_ACCESS_KEY)" || (echo "Set MCP_DEMO_ACCESS_KEY to a random temporary value"; exit 1)
-	SERVER_ADDRESS=127.0.0.1 SPRING_PROFILES_ACTIVE=mcp-demo MCP_DEMO_ACCESS_KEY=$(MCP_DEMO_ACCESS_KEY) DB_URL=jdbc:postgresql://$(DB_HOST):$(DB_PORT)/$(DB_NAME) DB_USER=$(DB_USER) mvn spring-boot:run
+	SERVER_ADDRESS=127.0.0.1 SERVER_PORT=$(MCP_DEMO_BACKEND_PORT) MCP_ALLOWED_HOSTS=127.0.0.1:$(MCP_DEMO_BACKEND_PORT) MCP_ALLOWED_ORIGINS=https://chatgpt.com,https://chat.openai.com SPRING_PROFILES_ACTIVE=mcp-demo MCP_DEMO_ACCESS_KEY=$(MCP_DEMO_ACCESS_KEY) DB_URL=jdbc:postgresql://$(DB_HOST):$(DB_PORT)/$(DB_NAME) DB_USER=$(DB_USER) mvn spring-boot:run
 
 mcp-demo-proxy:
 	@test -n "$(MCP_DEMO_ACCESS_KEY)" || (echo "Set MCP_DEMO_ACCESS_KEY to the same temporary value as the backend"; exit 1)
-	MCP_DEMO_ACCESS_KEY=$(MCP_DEMO_ACCESS_KEY) node scripts/mcp-demo-proxy.mjs
+	MCP_DEMO_ACCESS_KEY=$(MCP_DEMO_ACCESS_KEY) MCP_BACKEND_URL=http://127.0.0.1:$(MCP_DEMO_BACKEND_PORT) MCP_PROXY_PORT=$(MCP_DEMO_PROXY_PORT) node scripts/mcp-demo-proxy.mjs
+
+mcp-chatgpt-demo:
+	./scripts/mcp-chatgpt-demo.sh
 
 tenant-ui:
 	npm --prefix frontend/tenant run dev

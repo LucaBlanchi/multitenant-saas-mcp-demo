@@ -2,8 +2,9 @@ package com.acme.tenancy.controllers;
 
 import com.acme.tenancy.datatypes.ApiDtos.WorkItemCreate;
 import com.acme.tenancy.datatypes.ApiDtos.WorkItemRequest;
-import com.acme.tenancy.datatypes.ApiDtos.WorkItemView;
-import com.acme.tenancy.datatypes.ApiDtos.TenancyView;
+import com.acme.tenancy.datatypes.McpDtos.TenanciesResult;
+import com.acme.tenancy.datatypes.McpDtos.WorkItemsResult;
+import com.acme.tenancy.datatypes.McpDtos.WorkItemResult;
 import com.acme.tenancy.exceptions.ApiException;
 import com.acme.tenancy.repositories.UserRepository;
 import com.acme.tenancy.security.CurrentUser;
@@ -47,9 +48,10 @@ public class McpTools {
             description = "List only the organizations and membership roles of the authenticated user, as shown in the dashboard.",
             generateOutputSchema = true,
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-    public List<TenancyView> tenancies() {
+    public TenanciesResult tenancies() {
         UUID userId = currentUserId();
-        return audited("tenancies_list", userId, null, () -> access.tenancies(userId));
+        return audited("tenancies_list", userId, null,
+                () -> new TenanciesResult(access.tenancies(userId)));
     }
 
     @McpTool(
@@ -58,10 +60,12 @@ public class McpTools {
             description = "List work items for a tenancy where the authenticated user has a membership. Read only.",
             generateOutputSchema = true,
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-    public List<WorkItemView> list(
+    public WorkItemsResult list(
             @McpToolParam(description = "UUID of a tenancy the signed-in user belongs to", required = true) String tenancyId) {
         UUID userId = currentUserId();
-        return audited("work_items_list", userId, tenancyId, () -> workItems.list(userId, tenancyId));
+        return audited("work_items_list", userId, tenancyId,
+                () -> new WorkItemsResult(workItems.list(userId, tenancyId).stream()
+                        .map(WorkItemResult::from).toList()));
     }
 
     @McpTool(
@@ -70,7 +74,7 @@ public class McpTools {
             description = "Create an OPEN work item in a tenancy. The authenticated user must be an ADMIN member of that tenancy.",
             generateOutputSchema = true,
             annotations = @McpTool.McpAnnotations(readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false))
-    public WorkItemView create(
+    public WorkItemResult create(
             @McpToolParam(description = "UUID of a tenancy the signed-in user administers", required = true) String tenancyId,
             @McpToolParam(description = "Short work item title (1 to 160 characters)", required = true) String title,
             @McpToolParam(description = "Optional description (up to 2000 characters)", required = false) String description) {
@@ -78,7 +82,8 @@ public class McpTools {
         validateTitle(title);
         validateDescription(description);
         return audited("work_items_create", userId, tenancyId,
-                () -> workItems.create(userId, tenancyId, new WorkItemCreate(title.trim(), description)));
+                () -> WorkItemResult.from(workItems.create(userId, tenancyId,
+                        new WorkItemCreate(title.trim(), description))));
     }
 
     @McpTool(
@@ -87,7 +92,7 @@ public class McpTools {
             description = "Update a work item in a tenancy. The authenticated user must be an ADMIN member of that tenancy.",
             generateOutputSchema = true,
             annotations = @McpTool.McpAnnotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-    public WorkItemView update(
+    public WorkItemResult update(
             @McpToolParam(description = "UUID of a tenancy the signed-in user administers", required = true) String tenancyId,
             @McpToolParam(description = "UUID of the work item", required = true) String id,
             @McpToolParam(description = "Short work item title (1 to 160 characters)", required = true) String title,
@@ -101,8 +106,8 @@ public class McpTools {
             throw ApiException.badRequest("status must be OPEN, IN_PROGRESS, or DONE");
         }
         return audited("work_items_update", userId, tenancyId,
-                () -> workItems.update(userId, tenancyId, workItemId,
-                        new WorkItemRequest(title.trim(), description, status)));
+                () -> WorkItemResult.from(workItems.update(userId, tenancyId, workItemId,
+                        new WorkItemRequest(title.trim(), description, status))));
     }
 
     @McpTool(

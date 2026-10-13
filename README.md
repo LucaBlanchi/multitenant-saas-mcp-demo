@@ -74,6 +74,8 @@ In modalità Vite development (`npm run dev`) il login mostra un pulsante **Entr
 
 Il seed viene eseguito al primo avvio locale quando `APP_SEED_ENABLED=true` (predefinito fuori dal profilo `production`). Impostare `APP_SEED_ENABLED=false` per disabilitarlo. La migrazione `V2__rename_demo_data.sql` rinomina Acme/Globex solo se riconosce anche i due account demo e le loro membership iniziali; aggiorna poi le email demo corrispondenti, lasciando invariati gli ID e i work item. Per un database già esistente Flyway applica la migrazione al successivo avvio del backend.
 
+La migrazione `V3__rename_legacy_demo_data.sql` copre anche i database del primo demo che usavano i nomi esatti `Acme Corporation` e `Globex Industries`. Lo starter Flyway di Spring Boot 4 applica realmente queste migrazioni all'avvio; ID, membership e work item vengono conservati.
+
 Le credenziali sono pubbliche e non vanno riutilizzate. Il profilo `production` disabilita il seed per default e rifiuta il login locale username/password.
 
 ## Modello e autorizzazioni
@@ -123,6 +125,8 @@ Endpoint Streamable HTTP stateless: `POST /mcp`. I tool disponibili sono:
 
 Ogni tool usa i service applicativi, che applicano i controlli membership, tenancy e ruolo. Le chiamate sono registrate con nome tool, UUID utente/tenant, esito e durata; argomenti e contenuto business non sono scritti nei log di audit.
 
+I tool di elenco restituiscono oggetti `{ "tenancies": [...] }` e `{ "items": [...] }`, così anche gli schemi di output sono oggetti compatibili con i client MCP del 2025. Nel DTO MCP una descrizione assente viene resa come stringa vuota, coerentemente con lo schema dichiarato; il dominio e le API REST conservano la propria rappresentazione. Le risposte HTTP 200 possono contenere un risultato MCP `isError: true`: il controllo demo verifica il contenuto e una chiamata reale, non soltanto lo stato HTTP.
+
 ### Collegamento MCP locale
 
 Il login locale emette JWT di sviluppo, ma il profilo MCP demo è utile per un client che non offre un flusso OAuth. Avvialo in un terminale:
@@ -138,11 +142,27 @@ Avvia il proxy locale in un altro terminale con la stessa chiave:
 make mcp-demo-proxy MCP_DEMO_ACCESS_KEY="$MCP_DEMO_ACCESS_KEY"
 ```
 
-Il backend demo ascolta solo su `127.0.0.1:8080`; il proxy ascolta solo su `127.0.0.1:8081`, inoltra esclusivamente `POST /mcp`, limita il corpo della richiesta e verifica la chiave. Questa chiave di test è trasmessa come parametro `mcp_demo_key` nell'URL e può comparire in configurazioni o log del client: usa solo dati fittizi e non riutilizzarla.
+Il backend demo ascolta solo su `127.0.0.1:8082`; il proxy ascolta solo su `127.0.0.1:8083`, inoltra esclusivamente `POST /mcp`, limita il corpo della richiesta e verifica la chiave. Le porte sono configurabili con `MCP_DEMO_BACKEND_PORT` e `MCP_DEMO_PROXY_PORT`. Questa chiave di test è trasmessa come parametro `mcp_demo_key` nell'URL e può comparire in configurazioni o log del client: usa solo dati fittizi e non riutilizzarla.
+
+Spring AI/MCP Java SDK qui usato implementa le revisioni MCP del 2025. I client recenti, incluso ChatGPT, possono iniziare con `server/discover` della revisione 2026-07-28: il proxy demo risponde con l'errore standard `-32601` e HTTP 404, consentendo al client di ripiegare su `initialize`. Non dichiara supporto al protocollo 2026. Questo passaggio evita l'HTTP 500 del vecchio SDK. Per un endpoint cloud diretto, aggiornare il trasporto SDK o applicare lo stesso comportamento di negoziazione al gateway autenticato.
 
 Senza un bearer token, il profilo demo MCP agisce come `user1@email.com`: può scrivere in Company 1 (`ADMIN`) e solo leggere in Company 2 (`MEMBER`).
 
 Non esporre il profilo `mcp-demo` a Internet. Per un test ChatGPT tramite un tunnel temporaneo serve un endpoint HTTPS raggiungibile da ChatGPT che inoltri solo al proxy locale; il connettore va configurato senza autenticazione MCP, perché il proxy verifica la chiave nell'URL. Arresta il tunnel e ruota la chiave al termine del test. Non usare questa modalità per un deployment condiviso.
+
+#### Avvio completo per un test con ChatGPT
+
+Su macOS installa `cloudflared` da una fonte ufficiale (ad esempio `brew install cloudflared`), avvia PostgreSQL e assicurati che il database demo contenga i dati di seed. Poi esegui:
+
+```sh
+make mcp-chatgpt-demo
+```
+
+Il comando genera una chiave casuale temporanea, avvia backend e proxy su porte locali dedicate, apre un Quick Tunnel Cloudflare e stampa l'URL MCP completo. Lascia il terminale aperto durante la prova. In ChatGPT apri **Plugin → + → Aggiungi un server MCP personalizzato**, scegli **URL del server**, incolla l'URL stampato, seleziona **Nessuna autenticazione** e crea il plugin. Al termine interrompi il comando con `Ctrl+C`: tunnel, proxy e backend demo vengono fermati.
+
+Prima di stampare l'URL, il comando verifica anche la raggiungibilità pubblica, i cinque tool e la membership dell'utente demo. I Quick Tunnel sono temporanei: se Cloudflare li revoca, il comando termina e spegne i processi demo. Un nuovo avvio genera un nuovo URL e una nuova chiave; ChatGPT può richiedere la sostituzione dell'app demo perché l'URL di un'app già creata non è modificabile dalla relativa schermata. Per una connessione duratura usare un endpoint HTTPS stabile con OAuth o Secure MCP Tunnel.
+
+La demo usa `user1@email.com`: può leggere Company 1 e Company 2, ma può scrivere/eliminare solo in Company 1. L'URL contiene una chiave temporanea e i tool includono operazioni di modifica e cancellazione sui soli dati demo. Non condividere l'URL e non usarlo con dati reali. Questo è un percorso di prova locale, non un deployment SaaS.
 
 ### Profilo `production`
 
